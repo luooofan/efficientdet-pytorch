@@ -135,3 +135,7 @@ dmypy.json
 *.tar
 *.pth
 *.gz
+
+# Others
+output/
+temp.json

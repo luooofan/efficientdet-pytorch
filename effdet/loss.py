@@ -11,6 +11,9 @@ import torch.nn.functional as F
 
 from typing import Optional, List, Tuple
 
+from .anchors import decode_box_outputs
+from .iou_loss import *
+
 
 def focal_loss_legacy(logits, targets, alpha: float, gamma: float, normalizer):
     """Compute the focal loss between `logits` and the golden `target` values.
@@ -142,12 +145,38 @@ def one_hot(x, num_classes: int):
     return onehot.scatter(-1, x.unsqueeze(-1) * x_non_neg, 1) * x_non_neg
 
 
+class IouLoss(nn.Module):
+
+    def __init__(self, losstype='Giou', reduction='mean'):
+        super(IouLoss, self).__init__()
+        self.reduction = reduction
+        self.loss = losstype
+
+    def forward(self, target_bboxes, pred_bboxes):
+        num = target_bboxes.shape[0]
+        if self.loss == 'Iou':
+            loss = torch.sum(1.0 - compute_iou(target_bboxes, pred_bboxes))
+        elif self.loss == 'Giou':
+            loss = torch.sum(1.0 - compute_g_iou(target_bboxes, pred_bboxes))
+        elif self.loss == 'Diou':
+            loss = torch.sum(1.0 - compute_d_iou(target_bboxes, pred_bboxes))
+        else:
+            loss = torch.sum(1.0 - compute_c_iou(target_bboxes, pred_bboxes))
+
+        if self.reduction == 'mean':
+            return loss / num
+        else:
+            return loss
+
+
 def loss_fn(
         cls_outputs: List[torch.Tensor],
         box_outputs: List[torch.Tensor],
         cls_targets: List[torch.Tensor],
         box_targets: List[torch.Tensor],
         num_positives: torch.Tensor,
+        anchors: List[torch.Tensor],
+        positive_indices: List[torch.Tensor],
         num_classes: int,
         alpha: float,
         gamma: float,
@@ -155,7 +184,8 @@ def loss_fn(
         box_loss_weight: float,
         label_smoothing: float = 0.,
         legacy_focal: bool = False,
-        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        box_loss_type: str = None
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Computes total detection loss.
     Computes total detection loss including box and class loss from all levels.
     Args:
@@ -171,6 +201,11 @@ def loss_fn(
 
         num_positives: num positive grountruth anchors
 
+        anchors: a List with values representing anchors in
+            [batch_size, height, width, num_anchors * 4] at each feature level (index)
+
+        positive_indices: a List with values representing positive indices, which length is equal to batch_size
+
     Returns:
         total_loss: an integer tensor representing total loss reducing from class and box losses from all levels.
 
@@ -185,6 +220,11 @@ def loss_fn(
 
     cls_losses = []
     box_losses = []
+
+    if box_loss_type is not None:
+        box_loss_fc = IouLoss(losstype=box_loss_type, reduction=None)
+    count = 0
+
     for l in range(levels):
         cls_targets_at_level = cls_targets[l]
         box_targets_at_level = box_targets[l]
@@ -192,7 +232,7 @@ def loss_fn(
         # Onehot encoding for classification labels.
         cls_targets_at_level_oh = one_hot(cls_targets_at_level, num_classes)
 
-        bs, height, width, _, _ = cls_targets_at_level_oh.shape
+        bs, height, width, num_anchors_per_postion, _ = cls_targets_at_level_oh.shape
         cls_targets_at_level_oh = cls_targets_at_level_oh.view(bs, height, width, -1)
         cls_outputs_at_level = cls_outputs[l].permute(0, 2, 3, 1).float()
         if legacy_focal:
@@ -207,20 +247,51 @@ def loss_fn(
         cls_loss = cls_loss * (cls_targets_at_level != -2).unsqueeze(-1)
         cls_losses.append(cls_loss.sum())   # FIXME reference code added a clamp here at some point ...clamp(0, 2))
 
-        box_losses.append(_box_loss(
-            box_outputs[l].permute(0, 2, 3, 1).float(),
-            box_targets_at_level,
-            num_positives_sum,
-            delta=delta))
+        box_outputs_at_level = box_outputs[l].permute(0, 2, 3, 1).float()
+
+        if box_loss_type is None:
+            box_losses.append(_box_loss(
+                box_outputs_at_level,
+                box_targets_at_level,
+                num_positives_sum,
+                delta=delta))
+        else:
+            anchor_at_level = anchors[l]
+            next_count = count + height*width*num_anchors_per_postion
+
+            # select the positive_indices between count and next_count, which are belong to current level
+            tmp = [indices[(indices >= count)] for indices in positive_indices]
+            positive_indices_in_interval = ([indices[(indices < next_count)].long()-count for indices in tmp])
+
+            loss = []
+            for (pi, bo, bt, ac) in zip(positive_indices_in_interval, box_outputs_at_level, box_targets_at_level, anchor_at_level):
+                # for one of the batch
+                if pi.sum() > 0:
+                    # if have positive_indices
+                    valid_bo = bo.reshape(-1, 4)[pi]
+                    valid_bt = bt.reshape(-1, 4)[pi]
+                    valid_ac = ac.reshape(-1, 4)[pi]
+                    bboxes2 = decode_box_outputs(valid_bo, valid_ac, output_xyxy=True)
+                    bboxes1 = decode_box_outputs(valid_bt, valid_ac, output_xyxy=True)
+                    losstmp = box_loss_fc(bboxes1, bboxes2)
+                    loss.append(losstmp)
+
+            if len(loss) > 0:
+                box_losses.append(torch.stack(loss).mean())
+            count = next_count
 
     # Sum per level losses to total loss.
     cls_loss = torch.sum(torch.stack(cls_losses, dim=-1), dim=-1)
-    box_loss = torch.sum(torch.stack(box_losses, dim=-1), dim=-1)
-    total_loss = cls_loss + box_loss_weight * box_loss
+    total_loss = cls_loss
+    if len(box_losses) != 0:
+        box_loss = torch.sum(torch.stack(box_losses, dim=-1), dim=-1)
+        total_loss += box_loss_weight * box_loss
+    else:
+        box_loss = torch.tensor([0], device=total_loss.device)
     return total_loss, cls_loss, box_loss
 
 
-loss_jit = torch.jit.script(loss_fn)
+# loss_jit = torch.jit.script(loss_fn)
 
 
 class DetectionLoss(nn.Module):
@@ -238,6 +309,7 @@ class DetectionLoss(nn.Module):
         self.label_smoothing = config.label_smoothing
         self.legacy_focal = config.legacy_focal
         self.use_jit = config.jit_loss
+        self.box_loss_type = config.box_loss_type
 
     def forward(
             self,
@@ -245,15 +317,17 @@ class DetectionLoss(nn.Module):
             box_outputs: List[torch.Tensor],
             cls_targets: List[torch.Tensor],
             box_targets: List[torch.Tensor],
-            num_positives: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            num_positives: torch.Tensor,
+            anchors: List[torch.Tensor],
+            positive_indices: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
         l_fn = loss_fn
-        if not torch.jit.is_scripting() and self.use_jit:
-            # This branch only active if parent / bench itself isn't being scripted
-            # NOTE: I haven't figured out what to do here wrt to tracing, is it an issue?
-            l_fn = loss_jit
+        # if not torch.jit.is_scripting() and self.use_jit:
+        #     # This branch only active if parent / bench itself isn't being scripted
+        #     # NOTE: I haven't figured out what to do here wrt to tracing, is it an issue?
+        #     l_fn = loss_jit
 
         return l_fn(
-            cls_outputs, box_outputs, cls_targets, box_targets, num_positives,
+            cls_outputs, box_outputs, cls_targets, box_targets, num_positives, anchors, positive_indices,
             num_classes=self.num_classes, alpha=self.alpha, gamma=self.gamma, delta=self.delta,
-            box_loss_weight=self.box_loss_weight, label_smoothing=self.label_smoothing, legacy_focal=self.legacy_focal)
+            box_loss_weight=self.box_loss_weight, label_smoothing=self.label_smoothing, legacy_focal=self.legacy_focal, box_loss_type=self.box_loss_type)

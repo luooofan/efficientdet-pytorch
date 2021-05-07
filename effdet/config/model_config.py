@@ -69,12 +69,13 @@ def default_detection_model_configs():
 
     # localization loss (used by train bench)
     h.delta = 0.1
-    h.box_loss_weight = 50.0
+    h.box_loss_weight = 0.005  # 50.0  # 50.0 fit for huber_loss # 0.005 fit for giou loss
+    h.box_loss_type = "Giou"  # None  # None for huber_loss # "Iou" "Giou" "Diou" "Ciou"
 
     # nms
     h.soft_nms = False  # use soft-nms, this is incredibly slow
     h.max_detection_points = 5000  # max detections for post process, input to NMS
-    h.max_det_per_image = 100  # max detections per image limit, output of NMS
+    h.max_det_per_image = 1000  # max detections per image limit, output of NMS
 
     return h
 
@@ -389,7 +390,7 @@ efficientdet_model_param_dict = dict(
         url='',  # no pretrained weights yet
     ),
     efficientdet_es=dict(
-        name='efficientdet_es',   #EdgeTPU-Small
+        name='efficientdet_es',  # EdgeTPU-Small
         backbone_name='efficientnet_es',
         image_size=(512, 512),
         aspect_ratios=[1.0, 2.0, 0.5],

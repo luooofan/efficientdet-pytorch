@@ -24,27 +24,26 @@ Hacked together by Ross Wightman, original copyright below
 This module is borrowed from TPU RetinaNet implementation:
 https://github.com/tensorflow/tpu/blob/master/models/official/retinanet/anchors.py
 """
-from typing import Optional, Tuple, Sequence
 
-import numpy as np
-import torch
-import torch.nn as nn
 #import torchvision.ops.boxes as tvb
-from torchvision.ops.boxes import batched_nms, remove_small_boxes
-from typing import List
-
-from effdet.object_detection import ArgMaxMatcher, FasterRcnnBoxCoder, BoxList, IouSimilarity, TargetAssigner
-from .soft_nms import batched_soft_nms
 
 
 # The minimum score to consider a logit for identifying detections.
+from typing import Optional, Tuple, Sequence
+import numpy as np
+import torch
+import torch.nn as nn
+from torchvision.ops.boxes import batched_nms, remove_small_boxes
+from typing import List
+from effdet.object_detection import ArgMaxMatcher, FasterRcnnBoxCoder, BoxList, IouSimilarity, TargetAssigner
+from .soft_nms import batched_soft_nms
 MIN_CLASS_SCORE = -5.0
 
 # The score for a dummy detection
 _DUMMY_DETECTION_SCORE = -1e5
 
 
-def decode_box_outputs(rel_codes, anchors, output_xyxy: bool=False):
+def decode_box_outputs(rel_codes, anchors, output_xyxy: bool = False):
     """Transforms relative regression coordinates to absolute positions.
 
     Network predictions are normalized and relative to a given anchor; this
@@ -251,8 +250,10 @@ class Anchors(nn.Module):
         """Generates multiscale anchor boxes."""
         boxes_all = []
         for _, configs in self.config.items():
+            # different level
             boxes_level = []
             for config in configs:
+                # different 9 anchors on a level
                 stride, octave_scale, aspect, anchor_scale = config
                 base_anchor_size_x = anchor_scale * stride[1] * 2 ** octave_scale
                 base_anchor_size_y = anchor_scale * stride[0] * 2 ** octave_scale
@@ -338,9 +339,17 @@ class AnchorLabeler(object):
                 width_l represent the dimension of bounding box regression output at l-th level.
 
             num_positives: scalar tensor storing number of positives in an image.
+
+            anchors_out: list of anchors representing every level anchors. 
+                         Every item are tensor with shape [height_l, width_l, num_anchors].
+                         The height_l and width_l represent the dimension of class logits at l-th level.
+
+            matches_indices: all positives indices of anchors in an image
+
         """
         cls_targets_out = []
         box_targets_out = []
+        anchors_out = []
 
         if filter_valid:
             valid_idx = gt_classes > -1  # filter gt targets w/ label <= -1
@@ -361,11 +370,12 @@ class AnchorLabeler(object):
             steps = feat_size[0] * feat_size[1] * self.anchors.get_anchors_per_location()
             cls_targets_out.append(cls_targets[count:count + steps].view([feat_size[0], feat_size[1], -1]))
             box_targets_out.append(box_targets[count:count + steps].view([feat_size[0], feat_size[1], -1]))
+            anchors_out.append(self.anchors.boxes[count:count + steps].reshape([feat_size[0], feat_size[1], -1]))
             count += steps
 
         num_positives = (matches.match_results > -1).float().sum()
 
-        return cls_targets_out, box_targets_out, num_positives
+        return cls_targets_out, box_targets_out, num_positives, anchors_out, matches.matched_column_indices()
 
     def batch_label_anchors(self, gt_boxes, gt_classes, filter_valid=True):
         batch_size = len(gt_boxes)
@@ -373,7 +383,9 @@ class AnchorLabeler(object):
         num_levels = self.anchors.max_level - self.anchors.min_level + 1
         cls_targets_out = [[] for _ in range(num_levels)]
         box_targets_out = [[] for _ in range(num_levels)]
+        anchors_out = [[] for _ in range(num_levels)]
         num_positives_out = []
+        mathces_indices = []
 
         anchor_box_list = BoxList(self.anchors.boxes)
         for i in range(batch_size):
@@ -402,14 +414,16 @@ class AnchorLabeler(object):
                     cls_targets[count:count + steps].view([feat_size[0], feat_size[1], -1]))
                 box_targets_out[level_idx].append(
                     box_targets[count:count + steps].view([feat_size[0], feat_size[1], -1]))
+                anchors_out[level_idx].append(
+                    self.anchors.boxes[count:count + steps].view([feat_size[0], feat_size[1], -1]))
                 count += steps
                 if last_sample:
                     cls_targets_out[level_idx] = torch.stack(cls_targets_out[level_idx])
                     box_targets_out[level_idx] = torch.stack(box_targets_out[level_idx])
 
             num_positives_out.append((matches.match_results > -1).float().sum())
+            mathces_indices.append(matches.matched_column_indices())
             if last_sample:
                 num_positives_out = torch.stack(num_positives_out)
 
-        return cls_targets_out, box_targets_out, num_positives_out
-
+        return cls_targets_out, box_targets_out, num_positives_out, anchors_out, mathces_indices

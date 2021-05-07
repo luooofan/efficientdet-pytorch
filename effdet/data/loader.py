@@ -20,6 +20,7 @@ class DetectionFastCollate:
     threads.
 
     """
+
     def __init__(
             self,
             instance_keys=None,
@@ -80,20 +81,26 @@ class DetectionFastCollate:
                     target_tensor[i] = torch.tensor(tv, dtype=target_tensor.dtype)
 
             if self.anchor_labeler is not None:
-                cls_targets, box_targets, num_positives = self.anchor_labeler.label_anchors(
+                cls_targets, box_targets, num_positives, anchors, positives_indices = self.anchor_labeler.label_anchors(
                     labeler_inputs['bbox'], labeler_inputs['cls'], filter_valid=False)
+                labeler_outputs[f'label_positives_indices_{i}'] = torch.zeros(
+                    (batch_size,)+positives_indices.shape, dtype=torch.float32)
                 if i == 0:
                     # first batch elem, create destination tensors, separate key per level
-                    for j, (ct, bt) in enumerate(zip(cls_targets, box_targets)):
+                    for j, (ct, bt, ac) in enumerate(zip(cls_targets, box_targets, anchors)):
                         labeler_outputs[f'label_cls_{j}'] = torch.zeros(
                             (batch_size,) + ct.shape, dtype=torch.int64)
                         labeler_outputs[f'label_bbox_{j}'] = torch.zeros(
                             (batch_size,) + bt.shape, dtype=torch.float32)
+                        labeler_outputs[f'anchors_{j}'] = torch.zeros(
+                            (batch_size, ) + ac.shape, dtype=torch.float32)
                     labeler_outputs['label_num_positives'] = torch.zeros(batch_size)
-                for j, (ct, bt) in enumerate(zip(cls_targets, box_targets)):
+                for j, (ct, bt, ac) in enumerate(zip(cls_targets, box_targets, anchors)):
                     labeler_outputs[f'label_cls_{j}'][i] = ct
                     labeler_outputs[f'label_bbox_{j}'][i] = bt
+                    labeler_outputs[f'anchors_{j}'][i] = ac
                 labeler_outputs['label_num_positives'][i] = num_positives
+                labeler_outputs[f'label_positives_indices_{i}'] = positives_indices
         if labeler_outputs:
             target.update(labeler_outputs)
 
@@ -103,13 +110,13 @@ class DetectionFastCollate:
 class PrefetchLoader:
 
     def __init__(self,
-            loader,
-            mean=IMAGENET_DEFAULT_MEAN,
-            std=IMAGENET_DEFAULT_STD,
-            re_prob=0.,
-            re_mode='pixel',
-            re_count=1,
-            ):
+                 loader,
+                 mean=IMAGENET_DEFAULT_MEAN,
+                 std=IMAGENET_DEFAULT_STD,
+                 re_prob=0.,
+                 re_mode='pixel',
+                 re_count=1,
+                 ):
         self.loader = loader
         self.mean = torch.tensor([x * 255 for x in mean]).cuda().view(1, 3, 1, 1)
         self.std = torch.tensor([x * 255 for x in std]).cuda().view(1, 3, 1, 1)

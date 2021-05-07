@@ -126,12 +126,15 @@ class DetBenchTrain(nn.Module):
             assert 'label_num_positives' in target
             cls_targets = [target[f'label_cls_{l}'] for l in range(self.num_levels)]
             box_targets = [target[f'label_bbox_{l}'] for l in range(self.num_levels)]
+            anchors = [target[f'anchors_{l}'] for l in range(self.num_levels)]
             num_positives = target['label_num_positives']
+            positives_indices = [target[f'label_positives_indices_{bs}'] for bs in range(anchors[0].size()[0])]
         else:
-            cls_targets, box_targets, num_positives = self.anchor_labeler.batch_label_anchors(
+            cls_targets, box_targets, num_positives, anchors, positives_indices = self.anchor_labeler.batch_label_anchors(
                 target['bbox'], target['cls'])
 
-        loss, class_loss, box_loss = self.loss_fn(class_out, box_out, cls_targets, box_targets, num_positives)
+        loss, class_loss, box_loss = self.loss_fn(
+            class_out, box_out, cls_targets, box_targets, num_positives, anchors, positives_indices)
         output = {'loss': loss, 'class_loss': class_loss, 'box_loss': box_loss}
         if not self.training:
             # if eval mode, output detections for evaluation
