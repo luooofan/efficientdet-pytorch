@@ -22,8 +22,10 @@ def create_dataset(name, root, splits=('train', 'val')):
     if name.startswith('coco'):
         if 'coco2014' in name:
             dataset_cfg = Coco2014Cfg()
-        else:
+        elif 'coco2017' in name:
             dataset_cfg = Coco2017Cfg()
+        elif 'cocortts' in name:
+            dataset_cfg = CocoRTTSCfg()
         for s in splits:
             if s not in dataset_cfg.splits:
                 raise RuntimeError(f'{s} split not found in config')

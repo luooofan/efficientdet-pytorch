@@ -37,6 +37,21 @@ class Coco2014Cfg(CocoCfg):
 
 
 @dataclass
+class CocoRTTSCfg(CocoCfg):
+    variant: str = 'RTTS'
+    num_classes: int = 5
+    splits: Dict[str, dict] = field(default_factory=lambda: dict(
+        train=dict(ann_filename='RTTS/Json_Annotations/train_update_self.json',
+                   img_dir='RTTS/JPEGImages', has_labels=True),
+        val=dict(ann_filename='RTTS/Json_Annotations/val.json', img_dir='RTTS/JPEGImages', has_labels=True),
+        dryrun=dict(ann_filename='RTTS/Json_Annotations/dryrun.json',
+                    img_dir='RTTS/track1.1_dryrun_sample', has_labels=False),
+        test=dict(ann_filename='RTTS/Json_Annotations/test.json',
+                  img_dir='RTTS/Haze_test_3000', has_labels=False),
+    ))
+
+
+@dataclass
 class VocCfg:
     variant: str = None
     parser: str = 'voc'
@@ -57,7 +72,7 @@ class Voc2007Cfg(VocCfg):
             split_filename='VOC2007/ImageSets/Main/val.txt',
             ann_filename='VOC2007/Annotations/%s.xml',
             img_dir='VOC2007/JPEGImages'),
-        #test=dict(img_dir='JPEGImages')
+        # test=dict(img_dir='JPEGImages')
     ))
 
 
@@ -73,7 +88,7 @@ class Voc2012Cfg(VocCfg):
             split_filename='VOC2012/ImageSets/Main/val.txt',
             ann_filename='VOC2012/Annotations/%s.xml',
             img_dir='VOC2012/JPEGImages'),
-        #test=dict(img_dir='JPEGImages', split_file=None)
+        # test=dict(img_dir='JPEGImages', split_file=None)
     ))
 
 
@@ -89,9 +104,8 @@ class Voc0712Cfg(VocCfg):
             split_filename='VOC2007/ImageSets/Main/test.txt',
             ann_filename='VOC2007/Annotations/%s.xml',
             img_dir='VOC2007/JPEGImages'),
-        #test=dict(img_dir='JPEGImages', split_file=None)
+        # test=dict(img_dir='JPEGImages', split_file=None)
     ))
-
 
 
 @dataclass
