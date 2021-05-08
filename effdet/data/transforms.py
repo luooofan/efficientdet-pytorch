@@ -10,6 +10,10 @@ from PIL import Image
 import numpy as np
 import torch
 
+import albumentations as A
+from .cap_multi_aug import *
+from .bboxCapAug import bboxCapAug
+
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 IMAGENET_INCEPTION_MEAN = (0.5, 0.5, 0.5)
@@ -22,7 +26,19 @@ class ImageToNumpy:
         np_img = np.array(pil_img, dtype=np.uint8)
         if np_img.ndim < 3:
             np_img = np.expand_dims(np_img, axis=-1)
-        np_img = np.moveaxis(np_img, 2, 0)  # HWC to CHW
+        # np_img = np.moveaxis(np_img, 2, 0)  # HWC to CHW
+        return np_img, annotations
+
+
+class NumpyToImage:
+    def __call__(self, arr, annotations: dict):
+        return Image.fromarray(arr, mode='RGB'), annotations
+
+
+class HWC2CHW:
+
+    def __call__(self, np_img, annotations: dict):
+        np_img = np.moveaxis(np_img, 2, 0)
         return np_img, annotations
 
 
@@ -241,6 +257,25 @@ class Compose:
         return img, annotations
 
 
+class Albu:
+
+    def __init__(self, albu_transform):
+        self.transform = albu_transform
+
+    def __call__(self, img, annotations: dict):
+        bboxes = annotations['bbox']
+        bboxes[:, [0, 1, 2, 3]] = bboxes[:, [1, 0, 3, 2]]
+        augmented = self.transform(image=img, bboxes=bboxes, labels=annotations['cls'])
+        image = augmented['image']
+        bboxes = augmented['bboxes']
+        if len(bboxes) > 0:
+            annotations['bbox'] = np.array(bboxes)[:, [1, 0, 3, 2]]
+        else:
+            annotations['bbox'] = np.empty(shape=(0, 4))
+        annotations['cls'] = np.array(augmented['labels'])
+        return image, annotations
+
+
 def transforms_coco_eval(
         img_size=224,
         interpolation='bilinear',
@@ -255,6 +290,7 @@ def transforms_coco_eval(
         ResizePad(
             target_size=img_size, interpolation=interpolation, fill_color=fill_color),
         ImageToNumpy(),
+        HWC2CHW()
     ]
 
     assert use_prefetcher, "Only supporting prefetcher usage right now"
@@ -269,16 +305,82 @@ def transforms_coco_train(
         use_prefetcher=False,
         fill_color='mean',
         mean=IMAGENET_DEFAULT_MEAN,
-        std=IMAGENET_DEFAULT_STD):
+        std=IMAGENET_DEFAULT_STD,
+        mode='noaug'):
 
     fill_color = resolve_fill_color(fill_color, mean)
 
-    image_tfl = [
-        RandomFlip(horizontal=True, prob=0.5),
-        RandomResizePad(
-            target_size=img_size, interpolation=interpolation, fill_color=fill_color),
-        ImageToNumpy(),
-    ]
+    train_transforms = A.Compose([
+        # A.RandomSizedBBoxSafeCrop(img_size[0], img_size[1], p=1.0),
+        # A.ShiftScaleRotate(shift_limit=0, scale_limit=0.5, rotate_limit=0, p=0.5),
+        # A.RandomScale(scale_limit=0.5, p=1.0),
+        # A.Cutout(num_holes=8, max_h_size=int(0.1*img_size[0]), max_w_size=int(0.1*img_size[1]), fill_value=mean, p=0.5),
+        A.HorizontalFlip(p=0.5),
+        A.OneOf([
+            A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=1),
+            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=1),
+        ], p=0.5),
+        A.OneOf([
+            A.MedianBlur(blur_limit=3, p=1.0),
+            A.Blur(blur_limit=3, p=1.0),
+        ], p=0.5),
+        # A.RGBShift(r_shift_limit=20, g_shift_limit=20, b_shift_limit=20, p=0.5),
+    ],
+        p=1.0,
+        bbox_params=A.BboxParams(
+        format='pascal_voc',
+        min_area=0,  # drop bbox that smaller than 0 pixels
+        min_visibility=0,
+        label_fields=['labels']
+    ))
+
+    image_tfl = []
+    if mode == 'noaug':
+        image_tfl = [
+            ResizePad(
+                target_size=img_size, interpolation=interpolation, fill_color=fill_color),
+            ImageToNumpy(),
+            HWC2CHW()
+        ]
+    elif mode == 'aug':
+        image_tfl = [
+            RandomResizePad(
+                target_size=img_size, scale=(0.5, 2.0), interpolation=interpolation, fill_color=fill_color),
+            RandomFlip(horizontal=True, prob=0.5),
+            ImageToNumpy(),
+            HWC2CHW()
+        ]
+    elif mode == 'moreaug':
+        image_tfl = [
+            RandomResizePad(
+                target_size=img_size, scale=(0.5, 2.0), interpolation=interpolation, fill_color=fill_color),
+            ImageToNumpy(),
+            Albu(train_transforms),
+            HWC2CHW()
+        ]
+    # you can define your own augmentation mode, with implementation of bbox cap or cap using objects images.
+    # elif mode == 'your own augmentation mode':
+    #     image_tfl = [
+    #         RandomResizePad(
+    #             target_size=img_size, scale=(0.5, 2.0), interpolation=interpolation, fill_color=fill_color),
+    #         # RandomFlip(horizontal=True, prob=0.5),
+    #         ImageToNumpy(),
+    #         Albu(train_transforms),
+    #         # copy and paste augmentation using objects pictures
+    #         cap_aug(n_objects_range=[3, 3], glob_split='_', p=0.5,
+    #                 retry_iters=20, min_inter_area=100, glob_suffix='*.png'),
+    #         # bbox copy and paste augmentation
+    #         bboxCapAug(thresh=32*32, prob=0.8, copy_times=3, epochs=30, all_objects=False, one_object=False),
+    #         HWC2CHW()
+    #     ]
+    else:  # source: like aug mode
+        image_tfl = [
+            RandomFlip(horizontal=True, prob=0.5),
+            RandomResizePad(
+                target_size=img_size, interpolation=interpolation, fill_color=fill_color),
+            ImageToNumpy(),
+            HWC2CHW()
+        ]
 
     assert use_prefetcher, "Only supporting prefetcher usage right now"
 

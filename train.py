@@ -9,6 +9,14 @@ NVIDIA CUDA specific speedups adopted from NVIDIA Apex examples
 
 Hacked together by Ross Wightman (https://github.com/rwightman)
 """
+from timm.scheduler import create_scheduler
+from timm.optim import create_optimizer
+from timm.utils import *
+from timm.models.layers import set_layer_config
+from timm.models import resume_checkpoint, load_checkpoint
+from effdet.anchors import Anchors, AnchorLabeler
+from effdet.data import resolve_input_config, SkipSubset
+from effdet import create_model, unwrap_bench, create_loader, create_dataset, create_evaluator
 import os
 import argparse
 import time
@@ -36,14 +44,6 @@ try:
 except AttributeError:
     pass
 
-from effdet import create_model, unwrap_bench, create_loader, create_dataset, create_evaluator
-from effdet.data import resolve_input_config, SkipSubset
-from effdet.anchors import Anchors, AnchorLabeler
-from timm.models import resume_checkpoint, load_checkpoint
-from timm.models.layers import set_layer_config
-from timm.utils import *
-from timm.optim import create_optimizer
-from timm.scheduler import create_scheduler
 
 torch.backends.cudnn.benchmark = True
 
@@ -149,6 +149,8 @@ parser.add_argument('--recount', type=int, default=1,
                     help='Random erase count (default: 1)')
 parser.add_argument('--train-interpolation', type=str, default='random',
                     help='Training interpolation (random, bilinear, bicubic default: "random")')
+parser.add_argument('--train-transform-mode', type=str, default='noaug',
+                    help='Training transform mode (noaug, aug, moreaug, default: "noaug")')
 
 # loss
 parser.add_argument('--smoothing', type=float, default=None, help='override model config label smoothing')
@@ -490,6 +492,7 @@ def create_datasets_and_loaders(
         anchor_labeler=labeler,
         transform_fn=transform_train_fn,
         collate_fn=collate_fn,
+        train_transform_mode=args.train_transform_mode
     )
 
     if args.val_skip > 1:
