@@ -1,5 +1,46 @@
 # EfficientDet (PyTorch)
 
+## What's New
+
+I want to use EfficientDet model for this competition:[4th UG2+ challenge (CVPR 2021) Track 1.1 - Object Detection in the Hazy Condition](https://competitions.codalab.org/competitions/28022#learn_the_details).
+
+Since many tricks have not been implemented, I forked the source repository ([efficientdet-pytorch](https://github.com/rwightman/efficientdet-pytorch)) created by [rwightman](https://github.com/rwightman).
+
+Compared with original repository, what's new in this repo is shown below:
+
+- BBOX IoU loss (giou, diou, ciou)
+- More data augmentation strategy during training:
+  - noaug、aug、moreaug with [Albumentations](https://albumentations.ai/)
+  - copy and paste strategy
+- Multi-scale testing
+- [Weighted-Boxes-Fusion](https://github.com/ZFTurbo/Weighted-Boxes-Fusion)
+- Some ultilities
+  - augmentation visualization, result visualization
+  - every-category metrics and confusion matrix (need to clone my another repo:[CocoEvalPlus](https://github.com/Luoofan/CocoEvalPlus))
+
+There is no denying that the original repo is a great implementation of EfficientDet using PyTorch. I'm not sure whether my modification is suitable for all situations due to the complexity of the repo, which just works well in my own case.
+
+Example command for training, validating and testing:
+
+```shell
+# train
+python ./train.py --dataset cocortts --model tf_efficientdet_d0  --num-classes 5 --epochs 15 --lr 0.02 --warmup-epochs 3 --warmup-lr 0.02 --min-lr 0.00001 --lr-cycle-limit 3 --lr-cycle-mul 0.8 --native-amp --pretrained --decay-rate 0.1 -j 8 -b 8 --train-transform-mode moreaug ../
+
+# validate
+python ./validate.py --dataset cocortts --model tf_efficientdet_d4 --num-classes 5 -j 8 --pretrained --checkpoint ./output/d4/d4_bs6_moreaug/model_best.pth.tar -b 8 --native-amp --split val --wbf ../
+
+# test
+python ./validate.py --dataset cocortts --model tf_efficientdet_d4 --num-classes 5 -j 8 --pretrained --checkpoint /path/to/model -b 8 --native-amp --split test --wbf ../
+```
+
+You can get more information about parameters for training or validating by option `-h`. And you can obtain more details about the new repo by contacting with me.
+
+Welcome your discussions or issues!
+
+
+
+## Original README
+
 A PyTorch implementation of EfficientDet.
 
 It is based on the
@@ -73,7 +114,7 @@ A few things on priority list I haven't tackled yet:
 Training sanity checks were done on VOC and OI
   * 80.0 @ 50 mAP finetune on voc0712 with no attempt to tune params (roughly as per command below)
   * 18.0 mAP @ 50 for OI Challenge2019 after couple days of training (only 6 epochs, eek!). It's much bigger, and takes a LOONG time, many classes are quite challenging.
-  
+
 ### 2020-09-03
 * All models updated to latest checkpoints from TF original.
 * Add experimental soft-nms code, must be manually enabled right now. It is REALLY slow, .1-.2 mAP increase.
@@ -337,7 +378,7 @@ NOTE: I've only tried submitting D7 to dev server for sanity check so far
  Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.508
  Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.718
  Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.818
- ```
+```
 
 #### VAL2017
 
@@ -420,7 +461,7 @@ NOTE: I've only tried submitting D7 to dev server for sanity check so far
  Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.463057
  Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.685103
  Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.789180
-```
+ ```
 
 ##### TF-EfficientDet-D5
 ```
