@@ -9,7 +9,7 @@ Since many tricks have not been implemented, I forked the source repository ([ef
 Compared with original repository, what's new in this repo is shown below:
 
 - BBOX IoU loss (giou, diou, ciou)
-- More data augmentation strategy during training:
+- More data augmentation strategies during training:
   - noaug、aug、moreaug with [Albumentations](https://albumentations.ai/)
   - copy and paste strategy
 - Multi-scale testing
@@ -18,9 +18,9 @@ Compared with original repository, what's new in this repo is shown below:
   - augmentation visualization, result visualization
   - every-category metrics and confusion matrix (need to clone my another repo:[CocoEvalPlus](https://github.com/Luoofan/CocoEvalPlus))
 
-There is no denying that the original repo is a great implementation of EfficientDet using PyTorch. I'm not sure whether my modification is suitable for all situations due to the complexity of the repo, which just works well in my own case.
+There is no denying that the original repo is a great implementation of EfficientDet using PyTorch. I'm not sure whether my modification is suitable for all situations due to the complexity of the repo. It works well in my own case by now.
 
-Example command for training, validating and testing:
+Example commands for training, validating and testing:
 
 ```shell
 # train
@@ -30,7 +30,7 @@ python ./train.py --dataset cocortts --model tf_efficientdet_d0  --num-classes 5
 python ./validate.py --dataset cocortts --model tf_efficientdet_d4 --num-classes 5 -j 8 --pretrained --checkpoint ./output/d4/d4_bs6_moreaug/model_best.pth.tar -b 8 --native-amp --split val --wbf ../
 
 # test
-python ./validate.py --dataset cocortts --model tf_efficientdet_d4 --num-classes 5 -j 8 --pretrained --checkpoint /path/to/model -b 8 --native-amp --split test --wbf ../
+python ./validate.py --dataset cocortts --model tf_efficientdet_d4 --num-classes 5 -j 8 --pretrained --checkpoint /path/to/model -b 8 --native-amp --split test --wbf --results ./d4_best ../
 ```
 
 You can get more information about parameters for training or validating by option `-h`. And you can obtain more details about the new repo by contacting with me.
