@@ -2,13 +2,21 @@ from .efficientdet import EfficientDet, HeadNet
 from .bench import DetBenchTrain, DetBenchPredict
 from .config import get_efficientdet_config
 from .helpers import load_pretrained, load_checkpoint
+from typing import Sequence
 
 
 def create_model(
         model_name, bench_task='', num_classes=None, pretrained=False,
-        checkpoint_path='', checkpoint_ema=False, **kwargs):
+        checkpoint_path='', checkpoint_ema=False, image_size=None, **kwargs):
 
     config = get_efficientdet_config(model_name)
+
+    if bench_task == 'train':
+        config['image_size'] = config['image_size'][0]
+    if image_size is not None:
+        assert isinstance(image_size, Sequence) and len(image_size) == 2
+        config['image_size'] = image_size
+
     return create_model_from_config(
         config, bench_task=bench_task, num_classes=num_classes, pretrained=pretrained,
         checkpoint_path=checkpoint_path, checkpoint_ema=checkpoint_ema, **kwargs)
